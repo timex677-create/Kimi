@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bible Reflections</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, query, where, orderBy, onSnapshot, deleteDoc, doc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        
+        const app = initializeApp({
+            apiKey: "AIzaSyB_s-sIVQDCpmnSuqvVIVWRmy_cta8myoM",
+            authDomain: "church-bible-review.firebaseapp.com",
+            projectId: "church-bible-review",
+            storageBucket: "church-bible-review.firebasestorage.app",
+            messagingSenderId: "53543883622",
+            appId: "1:53543883622:web:95cb620a9bd60c0abb2ea7"
+        });
+        
+        const db = getFirestore(app);
+        window.db = db;
+        window.fb = { collection, addDoc, query, where, orderBy, onSnapshot, deleteDoc, doc, getDocs, serverTimestamp };
+    </script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f3f4f6; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1rem; }
+        .btn { background: #4f46e5; color: white; padding: 0.5rem 1rem; border-radius: 6px; border: none; cursor: pointer; }
+        .btn:hover { background: #4338ca; }
+        .chapter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 0.5rem; }
+        .chapter-btn { padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; background: white; cursor: pointer; }
+        .chapter-btn.active { background: #4f46e5; color: white; }
+        .reflection { background: #f9fafb; border-left: 4px solid #4f46e5; padding: 1rem; margin-bottom: 0.5rem; border-radius: 0 6px 6px 0; }
+        .admin-panel { position: fixed; right: -400px; top: 0; width: 400px; height: 100%; background: white; box-shadow: -2px 0 8px rgba(0,0,0,0.1); transition: right 0.3s; overflow-y: auto; z-index: 100; }
+        .admin-panel.open { right: 0; }
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; z-index: 50; }
+        .overlay.show { display: block; }
+    </style>
+<base target="_blank">
+</head>
+<body class="p-4 max-w-6xl mx-auto">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Bible Reflections</h1>
+        <button onclick="toggleAdmin()" class="text-gray-600 hover:text-gray-900">Admin</button>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6">
+        <!-- Left: Selection -->
+        <div>
+            <!-- Book Select -->
+            <div class="card">
+                <label class="block text-sm font-medium mb-2">Select Book</label>
+                <select id="bookSelect" onchange="changeBook(this.value)" class="w-full p-2 border rounded-lg mb-4">
+                    <!-- Populated by JS -->
+                </select>
+                
+                <label class="block text-sm font-medium mb-2">Select Chapter</label>
+                <div id="chapterGrid" class="chapter-grid">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Current Selection -->
+            <div class="card text-center">
+                <h2 id="currentRef" class="text-3xl font-bold text-indigo-600">Genesis 1</h2>
+                <p class="text-gray-500 mt-2">Share your reflection on this chapter</p>
+            </div>
+        </div>
+
+        <!-- Right: Reflections -->
+        <div>
+            <!-- Submit Form -->
+            <div class="card">
+                <h3 class="font-bold mb-4">Share Reflection</h3>
+                <input type="text" id="userName" placeholder="Your name (optional)" class="w-full p-2 border rounded mb-3">
+                <textarea id="reflectionText" rows="4" placeholder="Write your reflection..." class="w-full p-2 border rounded mb-3"></textarea>
+                <button onclick="submitReflection()" class="btn w-full">Submit Reflection</button>
+            </div>
+
+            <!-- List -->
+            <div class="card">
+                <h3 class="font-bold mb-4">Community Reflections (<span id="count">0</span>)</h3>
+                <div id="reflectionsList">
+                    <p class="text-gray-400 text-center py-4">No reflections yet</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Panel -->
+    <div class="overlay" onclick="toggleAdmin()"></div>
+    <div class="admin-panel p-6" id="adminPanel">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">Admin Panel</h2>
+            <button onclick="toggleAdmin()" class="text-gray-500">✕</button>
+        </div>
+        
+        <div class="flex gap-2 mb-4">
+            <select id="adminBook" onchange="loadAdmin()" class="flex-1 p-2 border rounded">
+                <option value="all">All Books</option>
+            </select>
+            <button onclick="loadAdmin()" class="btn">Refresh</button>
+        </div>
+        
+        <div id="adminList" class="space-y-2">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <script>
+        // Bible data: [Book Name, Chapters]
+        const books = [
+            ["Genesis",50],["Exodus",40],["Leviticus",27],["Numbers",36],["Deuteronomy",34],
+            ["Joshua",24],["Judges",21],["Ruth",4],["1 Samuel",31],["2 Samuel",24],
+            ["1 Kings",22],["2 Kings",25],["1 Chronicles",29],["2 Chronicles",36],["Ezra",10],
+            ["Nehemiah",13],["Esther",10],["Job",42],["Psalms",150],["Proverbs",31],
+            ["Ecclesiastes",12],["Song of Songs",8],["Isaiah",66],["Jeremiah",52],["Lamentations",5],
+            ["Ezekiel",48],["Daniel",12],["Hosea",14],["Joel",3],["Amos",9],
+            ["Obadiah",1],["Jonah",4],["Micah",7],["Nahum",3],["Habakkuk",3],
+            ["Zephaniah",3],["Haggai",2],["Zechariah",14],["Malachi",4],
+            ["Matthew",28],["Mark",16],["Luke",24],["John",21],["Acts",28],
+            ["Romans",16],["1 Corinthians",16],["2 Corinthians",13],["Galatians",6],["Ephesians",6],
+            ["Philippians",4],["Colossians",4],["1 Thessalonians",5],["2 Thessalonians",3],["1 Timothy",6],
+            ["2 Timothy",4],["Titus",3],["Philemon",1],["Hebrews",13],["James",5],
+            ["1 Peter",5],["2 Peter",3],["1 John",5],["2 John",1],["3 John",1],
+            ["Jude",1],["Revelation",22]
+        ];
+
+        let currentBook = 0;
+        let currentChapter = 1;
+        let unsubscribe = null;
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            // Populate book select
+            const select = document.getElementById('bookSelect');
+            const adminSelect = document.getElementById('adminBook');
+            books.forEach((book, i) => {
+                select.innerHTML += `<option value="${i}">${book[0]}</option>`;
+                adminSelect.innerHTML += `<option value="${i}">${book[0]}</option>`;
+            });
+            
+            renderChapters();
+            loadReflections();
+        });
+
+        function changeBook(index) {
+            currentBook = parseInt(index);
+            currentChapter = 1;
+            renderChapters();
+            updateDisplay();
+            loadReflections();
+        }
+
+        function renderChapters() {
+            const grid = document.getElementById('chapterGrid');
+            grid.innerHTML = '';
+            const chapterCount = books[currentBook][1];
+            
+            for (let i = 1; i <= chapterCount; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'chapter-btn ' + (i === currentChapter ? 'active' : '');
+                btn.textContent = i;
+                btn.onclick = () => selectChapter(i);
+                grid.appendChild(btn);
+            }
+        }
+
+        function selectChapter(chapter) {
+            currentChapter = chapter;
+            renderChapters();
+            updateDisplay();
+            loadReflections();
+        }
+
+        function updateDisplay() {
+            document.getElementById('currentRef').textContent = `${books[currentBook][0]} ${currentChapter}`;
+        }
+
+        async function submitReflection() {
+            const name = document.getElementById('userName').value || 'Anonymous';
+            const text = document.getElementById('reflectionText').value.trim();
+            
+            if (!text) return alert('Please write a reflection');
+            
+            await window.fb.addDoc(window.fb.collection(window.db, 'reflections'), {
+                bookIndex: currentBook,
+                bookName: books[currentBook][0],
+                chapter: currentChapter,
+                userName: name,
+                text: text,
+                timestamp: window.fb.serverTimestamp()
+            });
+            
+            document.getElementById('reflectionText').value = '';
+            alert('Reflection shared!');
+        }
+
+        function loadReflections() {
+            if (unsubscribe) unsubscribe();
+            
+            const q = window.fb.query(
+                window.fb.collection(window.db, 'reflections'),
+                window.fb.where('bookIndex', '==', currentBook),
+                window.fb.where('chapter', '==', currentChapter),
+                window.fb.orderBy('timestamp', 'desc')
+            );
+            
+            unsubscribe = window.fb.onSnapshot(q, (snapshot) => {
+                const list = document.getElementById('reflectionsList');
+                document.getElementById('count').textContent = snapshot.size;
+                
+                if (snapshot.empty) {
+                    list.innerHTML = '<p class="text-gray-400 text-center py-4">No reflections yet</p>';
+                    return;
+                }
+                
+                list.innerHTML = '';
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const div = document.createElement('div');
+                    div.className = 'reflection';
+                    div.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <strong>${data.userName}</strong>
+                            <small class="text-gray-500">${data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : ''}</small>
+                        </div>
+                        <p>${data.text}</p>
+                    `;
+                    list.appendChild(div);
+                });
+            });
+        }
+
+        // Admin functions
+        function toggleAdmin() {
+            document.getElementById('adminPanel').classList.toggle('open');
+            document.querySelector('.overlay').classList.toggle('show');
+            if (document.getElementById('adminPanel').classList.contains('open')) loadAdmin();
+        }
+
+        async function loadAdmin() {
+            const bookFilter = document.getElementById('adminBook').value;
+            const list = document.getElementById('adminList');
+            list.innerHTML = '<p>Loading...</p>';
+            
+            let q;
+            if (bookFilter === 'all') {
+                q = window.fb.query(window.fb.collection(window.db, 'reflections'), window.fb.orderBy('timestamp', 'desc'));
+            } else {
+                q = window.fb.query(
+                    window.fb.collection(window.db, 'reflections'),
+                    window.fb.where('bookIndex', '==', parseInt(bookFilter)),
+                    window.fb.orderBy('timestamp', 'desc')
+                );
+            }
+            
+            const snapshot = await window.fb.getDocs(q);
+            
+            if (snapshot.empty) {
+                list.innerHTML = '<p class="text-gray-400">No reflections</p>';
+                return;
+            }
+            
+            list.innerHTML = '';
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const div = document.createElement('div');
+                div.className = 'border p-3 rounded bg-gray-50';
+                div.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <span class="font-bold text-indigo-600">${data.bookName} ${data.chapter}</span>
+                        <button onclick="deleteReflection('${doc.id}')" class="text-red-500 text-sm">Delete</button>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-1">${data.userName}</p>
+                    <p class="mt-2">${data.text}</p>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        async function deleteReflection(id) {
+            if (!confirm('Delete this reflection?')) return;
+            await window.fb.deleteDoc(window.fb.doc(window.db, 'reflections', id));
+            loadAdmin();
+        }
+    </script>
+</body>
+</html>
